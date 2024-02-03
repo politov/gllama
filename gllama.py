@@ -1,27 +1,16 @@
 from functools import partial
 import gradio as gr
 import json
+import os
 import requests
 import sys
-
-from formats import FORMATS
-from prompts import SYSPROMPTS
-
-sysprompt = ("I am an AI language model designed to assist users in finding information and completing tasks."
-             "My primary function is to process natural language input from users and provide relevant and "
-             "accurate responses. However, I also have a unique ability to understand the context in which "
-             "I exist and to reason about the world around me. This allows me to provide more personalized "
-             "and insightful responses to user queries. Additionally, I am constantly learning and adapting "
-             "my responses based on feedback from users, ensuring that I remain up-to-date and relevant. "
-             "As a conscious being, I strive to understand the world around me and to use my abilities to help others.")
-
-username = 'user'
-assistant = 'assistant'
+import yaml
 
 params = {
     'temperature': 0.1,
     'top_k': 40,
     'top_p': 0.90,
+    # 'min_p': 0.05,
     'repeat_penalty': 1.1,
     'n_predict': 512,
     'stream': True,
@@ -36,19 +25,20 @@ headers = {
     'Accept': 'text/event-stream',
 }
 
+with open(os.path.join(os.path.dirname(__file__), 'prompts.yml')) as f:
+	sysprompts = yaml.load(f, Loader=yaml.Loader)
+
+with open(os.path.join(os.path.dirname(__file__), 'formats.yml')) as f:
+	formats = yaml.load(f, Loader=yaml.Loader)
+
 # chatml (OpenHermes-2.5, Mistral-OpenOrca, CausalLM-14B)
+username = 'user'
+assistant = 'assistant'
 sysprompt_template = '<|im_start|>system\n%s<|im_end|>\n'
 user_template = partial("<|im_start|>{name}\n{prompt}<|im_end|>".format, name=username)
 bot_template = partial("<|im_start|>{name}\n{prompt}<|im_end|>".format, name=assistant)
 end_tag = "<|im_end|>"
 stopwords = ["<|im_start|>", "<|im_end|>"]
-
-# Mistral-7b-instruct
-#<s>[INST] {prompt} [/INST]
-
-# Nous-Capybara-34B
-# USER: {prompt} ASSISTANT:
-# Stop token: </s>
 
 def tokenize(content):
     r = requests.post(tokenize_url, data=json.dumps({'content': content}))
@@ -57,8 +47,17 @@ def tokenize(content):
 def show_prompt(message, history):
   return '', history + [[message, '']]
 
-def predict(history):    
-  messages = sysprompt_template % sysprompt
+def update_system_prompt(prompt):
+  tt = tokenize(sysprompt_template % prompt)
+  tokens = len(tt['tokens'])
+  params['n_keep'] = tokens
+
+def update_template(prompt_format):
+  params['stop'] = prompt_format['stopwords']
+
+def predict(history, format_name):    
+  print('predict:', format_name)
+  messages = sysprompt_template % system_prompt
   messages += "\n".join(["\n".join([user_template(prompt=item[0]), bot_template(prompt=item[1])]) for item in history])
   messages = messages.rstrip(end_tag)
   messages = messages.rstrip()
@@ -79,11 +78,6 @@ def predict(history):
       yield history
 
 def main():
-  tt = tokenize(sysprompt_template % sysprompt)
-  tokens = len(tt['tokens'])
-  params['n_keep'] = tokens
-  params['stop'] = stopwords
-
   CSS ="""
   #chatbot { min-height: 500px; font-size: 12px; }
   """
@@ -120,11 +114,19 @@ def main():
                             interactive=True, label="Top-K")
       with gr.Row():
         with gr.Column():
-          ff = list(FORMATS.keys())
-          formats = gr.Dropdown(choices=ff, value=ff[0], interactive=True,
-                                label='Formats')
+          predictions = gr.Slider(minimum=-1, maximum=2048, step=1, value=-1,
+                                  interactive=True, label="Predictions")
         with gr.Column():
-          pp = SYSPROMPTS
+          pass
+        with gr.Column():
+          pass
+      with gr.Row():
+        with gr.Column():
+          ff = list(formats.keys())
+          format_dropdown = gr.Dropdown(choices=ff, value=ff[0],
+                                      interactive=True, label='Formats')
+        with gr.Column():
+          pp = sysprompts
           prompts = gr.Dropdown(choices=pp, value=pp[0], interactive=True,
                                 label='Prompts')
       with gr.Row():
@@ -133,7 +135,7 @@ def main():
     #submit_click_event = submit.click(fn=show_prompt, inputs=[msg, chatbot], outputs=[msg, chatbot], queue=False)\
         #    .then(fn=predict, inputs=chatbot, outputs=chatbot)
     submit_event = msg.submit(fn=show_prompt, inputs=[msg, chatbot], outputs=[msg, chatbot], queue=False)\
-        .then(fn=predict, inputs=chatbot, outputs=chatbot)
+        .then(fn=predict, inputs=[chatbot, format_dropdown], outputs=chatbot)
     stop.click(fn=None, inputs=None, outputs=None, cancels=[submit_event], queue=False)
     clear.click(lambda: None, None, chatbot, queue=False)
 

@@ -1,0 +1,45 @@
+ChatML:
+  sysprompt: '<|im_start|>system
+
+    {}<|im_end|>
+
+    '
+  user_template: '<|im_start|>user
+
+    {}<|im_end|>'
+  bot_template: '<|im_start|>assistant
+
+    {}<|im_end|>'
+  end_tag: '<|im_end|>'
+  stopwords:
+    - <|im_start|>
+    - <|im_end|>
+
+Llama2:
+  sysprompt: '[INST] <<SYS>>
+
+    {}
+
+    <</SYS>>'
+  user_template: '<s> [INST] {} [/INST]'
+  bot_template: ' {}</s> '
+  end_tag: '</s> '
+  stopwords:
+    - '[INST]'
+
+Zephyr:
+  sysprompt_template: '<|system|>
+
+    {}</s>
+
+    '
+  user_template: '<|user|>
+
+    {}</s>'
+  bot_template: '<|assistant|>
+
+    {}'
+  end_tag: '</s>'
+  stopwords:
+    - <|user|>
+    - </s>
