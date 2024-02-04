@@ -20,15 +20,18 @@ Llama2:
 
     {}
 
-    <</SYS>>'
+    <</SYS>>
+
+    '
   user_template: '<s> [INST] {} [/INST]'
   bot_template: ' {}</s> '
   end_tag: '</s> '
   stopwords:
     - '[INST]'
+    - '</s>'
 
 Zephyr:
-  sysprompt_template: '<|system|>
+  sysprompt: '<|system|>
 
     {}</s>
 
@@ -43,3 +46,30 @@ Zephyr:
   stopwords:
     - <|user|>
     - </s>
+
+Mistral:
+  sysprompt: '{}
+
+    '
+  user_template: '<s> [INST] {} [/INST]
+    '
+  bot_template: '{}
+    </s> '
+  end_tag: '</s>'
+  stopwords:
+    - '[INST]'
+    - '</s>'
+
+Alpaca:
+  sysprompt: '{}
+
+    '
+  user_template: '### Instruction:
+    {}'
+  bot_template: '### Response:
+    {}'
+  end_tag: ''
+  stopwords:
+    - '###'
+
+
