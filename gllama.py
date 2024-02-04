@@ -1,4 +1,3 @@
-from functools import partial
 import gradio as gr
 import json
 import os
@@ -7,12 +6,12 @@ import sys
 import yaml
 
 params = {
-    'temperature': 0.1,
+    'temperature': 0.2,
     'top_k': 40,
     'top_p': 0.90,
-    # 'min_p': 0.05,
     'repeat_penalty': 1.1,
-    'n_predict': 512,
+    'n_predict': -1,
+    'min_p': 0.0, # disabled
     'stream': True,
 }
 
@@ -31,15 +30,6 @@ with open(os.path.join(os.path.dirname(__file__), 'prompts.yml')) as f:
 with open(os.path.join(os.path.dirname(__file__), 'formats.yml')) as f:
 	formats = yaml.load(f, Loader=yaml.Loader)
 
-# chatml (OpenHermes-2.5, Mistral-OpenOrca, CausalLM-14B)
-username = 'user'
-assistant = 'assistant'
-sysprompt_template = '<|im_start|>system\n%s<|im_end|>\n'
-user_template = partial("<|im_start|>{name}\n{prompt}<|im_end|>".format, name=username)
-bot_template = partial("<|im_start|>{name}\n{prompt}<|im_end|>".format, name=assistant)
-end_tag = "<|im_end|>"
-stopwords = ["<|im_start|>", "<|im_end|>"]
-
 def tokenize(content):
     r = requests.post(tokenize_url, data=json.dumps({'content': content}))
     return r.json()
@@ -47,18 +37,29 @@ def tokenize(content):
 def show_prompt(message, history):
   return '', history + [[message, '']]
 
-def update_system_prompt(prompt):
-  tt = tokenize(sysprompt_template % prompt)
-  tokens = len(tt['tokens'])
-  params['n_keep'] = tokens
+def predict(history, format_name, sysprompt):
+  if format_name in formats:
+    llm_format = formats[format_name]
+    sysprompt_templ = llm_format['sysprompt']
+    user_template = llm_format['user_template']
+    bot_template = llm_format['bot_template']
+    end_tag = llm_format['end_tag']
+    stopwords = llm_format['stopwords']
+  else:
+    raise Error("Unknown format:", format_name)
 
-def update_template(prompt_format):
-  params['stop'] = prompt_format['stopwords']
+  params['stop'] = stopwords
 
-def predict(history, format_name):    
-  print('predict:', format_name)
-  messages = sysprompt_template % system_prompt
-  messages += "\n".join(["\n".join([user_template(prompt=item[0]), bot_template(prompt=item[1])]) for item in history])
+  tokens = tokenize(sysprompt_templ.format(sysprompt))
+  if 'tokens' in tokens:
+    params['n_keep'] = len(tokens['tokens'])
+  else:
+    params['n_keep'] = -1
+
+  print('params:', params)
+
+  messages = sysprompt_templ.format(sysprompt)
+  messages += "\n".join(["\n".join([user_template.format(item[0]), bot_template.format(item[1])]) for item in history])
   messages = messages.rstrip(end_tag)
   messages = messages.rstrip()
   messages += "\n"
@@ -77,12 +78,21 @@ def predict(history, format_name):
         return history
       yield history
 
+def update_params(temp, top_p, top_k, predictions, repeat_penalty, min_p):
+  params['temperature'] = temp
+  params['top_p'] = top_p
+  params['top_k'] = top_k
+  params['n_predict'] = predictions
+  params['repeat_penalty'] = repeat_penalty
+  params['min_p'] = min_p
+
 def main():
   CSS ="""
-  #chatbot { min-height: 500px; font-size: 12px; }
+  #chatbot { min-height: 500px; }
   """
-            
-  with gr.Blocks(css=CSS, title='LocalLlama', theme=gr.themes.Monochrome()) as demo:
+
+  with gr.Blocks(css=CSS, title='LocalLlama',
+                 theme=gr.themes.Monochrome(text_size="sm")) as demo:
     with gr.Row():
       chatbot = gr.Chatbot(elem_id="chatbot",
                            layout='panel',
@@ -97,50 +107,62 @@ def main():
                        show_label=False,
                        container=False)
     with gr.Row():
-      clear = gr.Button(value="Clear", variant="secondary")
-      stop = gr.Button(value="Stop", variant="secondary")
-      #submit = gr.Button(value="Send", variant="primary")
+      with gr.Column(scale=3):
+        pass
+      with gr.Column(scale=1):
+        with gr.Row():
+          clear = gr.Button(value="Clear", variant="secondary", size="sm")
+          stop = gr.Button(value="Stop", variant="stop", size="sm")
+          # submit = gr.Button(value="Send", variant="primary", size="sm")
 
     with gr.Accordion("Settings", open=False):
       with gr.Row():
         with gr.Column():
-          temp = gr.Slider(minimum=0, maximum=2.0, step=0.1, value=0.2,
+          temp = gr.Slider(minimum=0, maximum=2.0, step=0.1,
+                           value=params['temperature'],
                            interactive=True, label="Temp")
         with gr.Column():
-          top_p = gr.Slider(minimum=0, maximum=1, step=0.01, value=0.95,
+          top_p = gr.Slider(minimum=0, maximum=1, step=0.01,
+                            value=params['top_p'],
                             interactive=True, label="Top-P")
         with gr.Column():
-          top_k = gr.Slider(minimum=0, maximum=100, step=1, value=40,
+          top_k = gr.Slider(minimum=0, maximum=100, step=1,
+                            value=params['top_k'],
                             interactive=True, label="Top-K")
       with gr.Row():
         with gr.Column():
-          predictions = gr.Slider(minimum=-1, maximum=2048, step=1, value=-1,
+          predictions = gr.Slider(minimum=-1, maximum=2048, step=1,
+                                  value=params['n_predict'],
                                   interactive=True, label="Predictions")
         with gr.Column():
-          pass
+          penalty = gr.Slider(minimum=1.0, maximum=1.25, step=0.01,
+                              value=params['repeat_penalty'],
+                              interactive=True, label="Repeat penalty")
         with gr.Column():
-          pass
+          min_p = gr.Slider(minimum=0, maximum=0.5, step=0.01,
+                            value=params['min_p'],
+                            interactive=True, label="Min-p")
       with gr.Row():
         with gr.Column():
           ff = list(formats.keys())
           format_dropdown = gr.Dropdown(choices=ff, value=ff[0],
-                                      interactive=True, label='Formats')
+                                        interactive=True, label='Formats')
         with gr.Column():
-          pp = sysprompts
-          prompts = gr.Dropdown(choices=pp, value=pp[0], interactive=True,
-                                label='Prompts')
+          prompts = gr.Dropdown(choices=sysprompts, value=sysprompts[0],
+                                interactive=True, label='Prompts')
       with gr.Row():
-        system_prompt = gr.Textbox(label='System prompt')
-        
+        system_prompt = gr.Textbox(label='System prompt', value=sysprompts[0],
+                                   interactive=True)
+
     #submit_click_event = submit.click(fn=show_prompt, inputs=[msg, chatbot], outputs=[msg, chatbot], queue=False)\
         #    .then(fn=predict, inputs=chatbot, outputs=chatbot)
     submit_event = msg.submit(fn=show_prompt, inputs=[msg, chatbot], outputs=[msg, chatbot], queue=False)\
-        .then(fn=predict, inputs=[chatbot, format_dropdown], outputs=chatbot)
+        .then(fn=update_params, inputs=[temp, top_p, top_k, predictions, penalty, min_p], queue=False)\
+        .then(fn=predict, inputs=[chatbot, format_dropdown, system_prompt], outputs=chatbot)
+
     stop.click(fn=None, inputs=None, outputs=None, cancels=[submit_event], queue=False)
     clear.click(lambda: None, None, chatbot, queue=False)
-
     prompts.select(lambda x: x, inputs=[prompts], outputs=system_prompt)
-    system_prompt.value = prompts.value
 
   demo.queue()
   demo.launch()
