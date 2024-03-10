@@ -1,3 +1,4 @@
+from datetime import datetime
 import gradio as gr
 import json
 import os
@@ -37,6 +38,21 @@ def tokenize(content):
 def show_prompt(message, history):
   return '', history + [[message, '']]
 
+def fetch_content(prompt, opt_params=None):
+  payload = params.copy()
+  if opt_params is not None:
+    payload.update(opt_params)
+  payload['prompt'] = prompt
+  data = requests.request('POST', completion_url, data=json.dumps(payload),
+                          stream=payload['stream'], headers=headers)
+  for line in data.iter_lines():
+    if line:
+      decoded_line = line.decode('utf-8')
+      if decoded_line.startswith('data:'):
+        decoded_line = decoded_line[6:]
+      d = json.loads(decoded_line)
+      yield d['content']
+
 def predict(history, format_name, sysprompt):
   if format_name in formats:
     llm_format = formats[format_name]
@@ -65,18 +81,17 @@ def predict(history, format_name, sysprompt):
   messages += "\n"
 
   history[-1][1] = ''
-  payload = params.copy()
-  payload['prompt'] = messages
-  data = requests.request('POST', completion_url, data=json.dumps(payload),
-                          stream=True, headers=headers)
-  for line in data.iter_lines():
-    if line:
-      decoded_line = line.decode('utf-8')
-      d = json.loads(decoded_line[6:])
-      history[-1][1] += d['content']
-      if (d['stop']):
-        return history
-      yield history
+  for line in fetch_content(messages):
+    history[-1][1] += line
+    yield history
+
+  return history
+
+def save_history(history):
+  print('save_history:', history[-1])
+  filename = './history/' + datetime.now().strftime('%Y-%m-%d') + '.json'
+  with open(filename, 'a') as f:
+    f.write('\n' + json.dumps(history[-1]))
 
 def update_params(temp, top_p, top_k, predictions, repeat_penalty, min_p):
   params['temperature'] = temp
@@ -85,6 +100,12 @@ def update_params(temp, top_p, top_k, predictions, repeat_penalty, min_p):
   params['n_predict'] = predictions
   params['repeat_penalty'] = repeat_penalty
   params['min_p'] = min_p
+
+def grammar_check(prompt):
+  ss = f'Check the following line, which is enclosed by a double quotes for grammar and positional mistakes, and provide a revised line — “{prompt}".'
+  params2 = {'stream': False, 'temperature': 0.1, 'n_keep': 0, 'cache_prompt': False}
+  revised_prompt = ''.join(fetch_content(ss, params2))
+  return prompt + revised_prompt
 
 def main():
   CSS ="""
@@ -107,10 +128,11 @@ def main():
                        show_label=False,
                        container=False)
     with gr.Row():
-      with gr.Column(scale=3):
+      with gr.Column(scale=1):
         pass
       with gr.Column(scale=1):
         with gr.Row():
+          check_btn = gr.Button(value="Check", variant="secondary", size="sm")
           clear = gr.Button(value="Clear", variant="secondary", size="sm")
           stop = gr.Button(value="Stop", variant="stop", size="sm")
           # submit = gr.Button(value="Send", variant="primary", size="sm")
@@ -158,11 +180,14 @@ def main():
         #    .then(fn=predict, inputs=chatbot, outputs=chatbot)
     submit_event = msg.submit(fn=show_prompt, inputs=[msg, chatbot], outputs=[msg, chatbot], queue=False)\
         .then(fn=update_params, inputs=[temp, top_p, top_k, predictions, penalty, min_p], queue=False)\
-        .then(fn=predict, inputs=[chatbot, format_dropdown, system_prompt], outputs=chatbot)
+        .then(fn=predict, inputs=[chatbot, format_dropdown, system_prompt], outputs=chatbot)\
+        .then(fn=save_history, inputs=[chatbot])
 
     stop.click(fn=None, inputs=None, outputs=None, cancels=[submit_event], queue=False)
     clear.click(lambda: None, None, chatbot, queue=False)
     prompts.select(lambda x: x, inputs=[prompts], outputs=system_prompt)
+
+    check_btn.click(fn=grammar_check, inputs=[msg], outputs=[msg])
 
   demo.queue()
   demo.launch()
