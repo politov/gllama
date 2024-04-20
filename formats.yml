@@ -72,4 +72,29 @@ Alpaca:
   stopwords:
     - '###'
 
+Vicuna:
+  sysprompt: '{}
 
+    '
+  user_template: 'USER:
+    {}'
+  bot_template: 'ASSISTANT:
+    {}'
+  end_tag: ''
+  stopwords:
+
+Llama3:
+  sysprompt: '<|start_header_id|>system<|end_header_id|>
+
+    {}<|eot_id|>
+
+    '
+  user_template: '<|start_header_id|>user<|end_header_id|>
+
+    {}<|eot_id|>'
+  bot_template: '<|start_header_id|>assistant<|end_header_id|>
+
+    {}<|eot_id|>'
+  end_tag: '<|eot_id|>'
+  stopwords:
+    - <|eot_id|>
